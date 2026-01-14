@@ -1,0 +1,15 @@
+# GUI Framework
+customtkinter>=5.2.0
+
+# Download Engine
+yt-dlp>=2024.1.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Linting
+ruff>=0.1.0
+
+# Packaging (optional, for later phase)
+# pyinstaller>=6.0.0
