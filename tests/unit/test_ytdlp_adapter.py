@@ -9,6 +9,12 @@ from src.domain.models import DownloadFormat
 from src.infra.ytdlp_adapter import YtdlpAdapter
 
 
+@pytest.fixture(autouse=True)
+def ffmpeg_available(monkeypatch):
+    # Unit tests mock yt-dlp; they must not depend on a system FFmpeg install.
+    monkeypatch.setattr("src.infra.ytdlp_adapter.shutil.which", lambda name: f"/mock/{name}")
+
+
 @pytest.mark.parametrize(
     "format, extension",
     [

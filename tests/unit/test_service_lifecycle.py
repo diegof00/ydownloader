@@ -52,7 +52,7 @@ def test_success_records_final_path_and_title():
     assert job.status == DownloadStatus.COMPLETED
     assert job.url == "https://example.com/video"
     assert job.title == "Title"
-    assert history.add.call_args.args[0].output_path == "/output/final.mp4"
+    assert Path(history.add.call_args.args[0].output_path) == Path("/output/final.mp4")
     complete.assert_called_once_with(job)
     error.assert_not_called()
     assert not service.is_running()
