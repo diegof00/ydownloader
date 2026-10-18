@@ -6,7 +6,6 @@ Provides OS-independent access to system folders and platform detection.
 
 import platform
 from pathlib import Path
-from typing import Optional
 
 
 def get_os_name() -> str:
@@ -83,7 +82,7 @@ def get_app_data_folder() -> Path:
     return app_data
 
 
-def _get_xdg_download_dir() -> Optional[Path]:
+def _get_xdg_download_dir() -> Path | None:
     """
     Get XDG user download directory on Linux.
 

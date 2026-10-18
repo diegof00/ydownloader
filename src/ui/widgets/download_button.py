@@ -2,8 +2,9 @@
 Download button widget that toggles between Download and Cancel.
 """
 
+from collections.abc import Callable
+
 import customtkinter as ctk
-from typing import Callable, Optional
 
 
 class DownloadButton(ctk.CTkFrame):
@@ -18,9 +19,9 @@ class DownloadButton(ctk.CTkFrame):
     def __init__(
         self,
         master,
-        on_download: Optional[Callable[[], None]] = None,
-        on_cancel: Optional[Callable[[], None]] = None,
-        **kwargs
+        on_download: Callable[[], None] | None = None,
+        on_cancel: Callable[[], None] | None = None,
+        **kwargs,
     ):
         """
         Initialize download button widget.

@@ -10,22 +10,22 @@ The domain layer is independent of UI and infrastructure concerns,
 making it easy to test and potentially reuse in other contexts (CLI, web).
 """
 
+from src.domain.errors import (
+    CancelledException,
+    ContentUnavailableError,
+    DiskSpaceError,
+    DomainError,
+    DownloadError,
+    InvalidURLError,
+    PermissionError,
+    UnsupportedSiteError,
+)
 from src.domain.models import (
     Download,
     DownloadFormat,
     DownloadStatus,
     HistoryEntry,
     Settings,
-)
-from src.domain.errors import (
-    DomainError,
-    InvalidURLError,
-    UnsupportedSiteError,
-    DownloadError,
-    PermissionError,
-    DiskSpaceError,
-    CancelledException,
-    ContentUnavailableError,
 )
 
 __all__ = [

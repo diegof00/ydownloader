@@ -9,17 +9,16 @@ This service coordinates:
 - History management
 """
 
-from pathlib import Path
-from typing import Callable, Optional, Protocol
 import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import Protocol
 
-from src.domain.models import Download, DownloadFormat, DownloadStatus
-from src.domain.validators import URLValidator, ValidationResult
 from src.domain.errors import (
     CancelledException,
-    PermissionError,
-    DiskSpaceError,
 )
+from src.domain.models import Download, DownloadFormat, DownloadStatus
+from src.domain.validators import URLValidator
 
 
 class DownloaderProtocol(Protocol):
@@ -33,6 +32,7 @@ class DownloaderProtocol(Protocol):
         on_progress: Callable,
     ) -> Path: ...
 
+    def prepare(self) -> None: ...
     def cancel(self) -> None: ...
 
 
@@ -52,7 +52,7 @@ class HistoryStorageProtocol(Protocol):
 
 
 # Type aliases for callbacks
-ProgressCallback = Callable[[int, DownloadStatus, Optional[str]], None]
+ProgressCallback = Callable[[int, DownloadStatus, str | None], None]
 CompleteCallback = Callable[[Download], None]
 ErrorCallback = Callable[[str], None]
 
@@ -70,7 +70,7 @@ class DownloadService:
         validator: URLValidator,
         downloader: DownloaderProtocol,
         file_system: FileSystemProtocol,
-        history_store: Optional[HistoryStorageProtocol] = None,
+        history_store: HistoryStorageProtocol | None = None,
     ):
         """
         Initialize the download service.
@@ -85,9 +85,10 @@ class DownloadService:
         self._downloader = downloader
         self._file_system = file_system
         self._history_store = history_store
-        self._current_download: Optional[Download] = None
-        self._download_thread: Optional[threading.Thread] = None
+        self._current_download: Download | None = None
+        self._download_thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._worker_active = False
 
     def start_download(
         self,
@@ -97,7 +98,7 @@ class DownloadService:
         on_progress: ProgressCallback,
         on_complete: CompleteCallback,
         on_error: ErrorCallback,
-    ) -> Optional[Download]:
+    ) -> Download | None:
         """
         Start a new download.
 
@@ -113,10 +114,10 @@ class DownloadService:
             The Download object if started, None if rejected
         """
         with self._lock:
-            # Check if download is already in progress
-            if self._current_download and self._current_download.is_active:
-                on_error("Ya hay una descarga en progreso. Cancela la actual para iniciar otra.")
-                return None
+            busy = self._worker_active
+        if busy:
+            on_error("Ya hay una descarga en progreso. Cancela la actual para iniciar otra.")
+            return None
 
         # Validate URL
         validation = self._validator.validate(url)
@@ -134,13 +135,23 @@ class DownloadService:
 
         # Create download object
         download = Download(
-            url=url,
+            url=url.strip(),
             output_path=output_folder / "downloading",  # Placeholder, will be updated
             format=format,
         )
 
         with self._lock:
-            self._current_download = download
+            # Validation runs outside the lock; reserve the slot atomically afterwards.
+            if self._worker_active:
+                rejected = True
+            else:
+                self._downloader.prepare()
+                self._current_download = download
+                self._worker_active = True
+                rejected = False
+        if rejected:
+            on_error("Ya hay una descarga en progreso. Cancela la actual para iniciar otra.")
+            return None
 
         # Start download in background thread
         self._download_thread = threading.Thread(
@@ -181,7 +192,9 @@ class DownloadService:
                 title = progress_info.get("title")
                 status = DownloadStatus.DOWNLOADING
 
-                if progress_info.get("status") == "processing":
+                if progress_info.get("status") == "connecting":
+                    status = DownloadStatus.CONNECTING
+                elif progress_info.get("status") == "processing":
                     status = DownloadStatus.PROCESSING
 
                 download.update_progress(percent, status, title)
@@ -222,9 +235,7 @@ class DownloadService:
 
         finally:
             with self._lock:
-                if self._current_download and self._current_download.id == download.id:
-                    if download.is_terminal:
-                        pass  # Keep reference for history
+                self._worker_active = False
 
     def cancel_download(self, download_id: str) -> bool:
         """
@@ -246,11 +257,11 @@ class DownloadService:
             if not self._current_download.is_active:
                 return False
 
-        # Cancel the downloader
-        self._downloader.cancel()
-        return True
+            # Keep cancellation paired with this job until the signal is sent.
+            self._downloader.cancel()
+            return True
 
-    def get_current_download(self) -> Optional[Download]:
+    def get_current_download(self) -> Download | None:
         """
         Get the current download if any.
 
@@ -259,3 +270,8 @@ class DownloadService:
         """
         with self._lock:
             return self._current_download
+
+    def is_running(self) -> bool:
+        """Whether the worker still owns the adapter or is saving history."""
+        with self._lock:
+            return self._worker_active

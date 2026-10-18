@@ -8,12 +8,11 @@ Provides platform-independent file system operations including:
 - File deletion
 """
 
-import os
 import shutil
+import tempfile
 from pathlib import Path
-from typing import Optional
 
-from src.infra.platform import get_downloads_folder, get_app_data_folder
+from src.infra.platform import get_app_data_folder, get_downloads_folder
 
 
 class FileSystem:
@@ -38,14 +37,9 @@ class FileSystem:
                 # Try to create it
                 folder.mkdir(parents=True, exist_ok=True)
 
-            # Try to create a test file
-            test_file = folder / ".ydownloader_write_test"
-            try:
-                test_file.touch()
-                test_file.unlink()
+            # Use an exclusive temporary file; never touch an existing user file.
+            with tempfile.TemporaryFile(dir=folder):
                 return True
-            except (PermissionError, OSError):
-                return False
 
         except Exception:
             return False
@@ -70,9 +64,7 @@ class FileSystem:
         except Exception:
             return 0
 
-    def get_unique_filename(
-        self, folder: Path, base_name: str, extension: str
-    ) -> Path:
+    def get_unique_filename(self, folder: Path, base_name: str, extension: str) -> Path:
         """
         Generate a unique filename in the folder.
 
@@ -109,6 +101,7 @@ class FileSystem:
             # Safety limit
             if counter > 9999:
                 import uuid
+
                 return folder / f"{base_name}_{uuid.uuid4().hex[:8]}{extension}"
 
     def delete_file(self, path: Path) -> bool:

@@ -4,12 +4,11 @@ Domain models for YDownloader.
 Contains all data models, enums, and value objects used in the domain layer.
 """
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
-import uuid
 
 
 class DownloadFormat(Enum):
@@ -55,17 +54,17 @@ class Download:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: DownloadStatus = DownloadStatus.PENDING
     progress: int = 0
-    title: Optional[str] = None
-    error_message: Optional[str] = None
+    title: str | None = None
+    error_message: str | None = None
     started_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     def __post_init__(self):
         """Validate download data after initialization."""
         if not 0 <= self.progress <= 100:
             raise ValueError(f"Progress must be between 0 and 100, got {self.progress}")
 
-    def update_progress(self, percent: int, status: DownloadStatus, title: Optional[str] = None):
+    def update_progress(self, percent: int, status: DownloadStatus, title: str | None = None):
         """
         Update download progress.
 
@@ -166,6 +165,13 @@ class HistoryEntry:
     @classmethod
     def from_dict(cls, data: dict) -> "HistoryEntry":
         """Create from dictionary (JSON deserialization)."""
+        fields = ("id", "title", "output_path", "status", "format", "completed_at")
+        if not isinstance(data, dict) or any(not isinstance(data.get(key), str) for key in fields):
+            raise ValueError("Invalid history entry")
+        if data["status"] not in {"completed", "cancelled", "error"}:
+            raise ValueError("Invalid history status")
+        if data["format"] not in {"audio", "video"}:
+            raise ValueError("Invalid history format")
         return cls(
             id=data["id"],
             title=data["title"],
@@ -187,7 +193,7 @@ class Settings:
         show_disclaimer: Whether to show legal disclaimer on startup
     """
 
-    last_output_folder: Optional[str] = None
+    last_output_folder: str | None = None
     default_format: str = "video"
     show_disclaimer: bool = True
 
@@ -203,8 +209,13 @@ class Settings:
     @classmethod
     def from_dict(cls, data: dict) -> "Settings":
         """Create from dictionary (JSON deserialization)."""
+        folder = data.get("last_output_folder")
+        format = data.get("default_format", "video")
+        disclaimer = data.get("show_disclaimer", True)
         return cls(
-            last_output_folder=data.get("last_output_folder"),
-            default_format=data.get("default_format", "video"),
-            show_disclaimer=data.get("show_disclaimer", True),
+            last_output_folder=folder if isinstance(folder, str) else None,
+            default_format=format
+            if isinstance(format, str) and format in ("video", "audio")
+            else "video",
+            show_disclaimer=disclaimer if isinstance(disclaimer, bool) else True,
         )

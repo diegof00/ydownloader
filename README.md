@@ -179,8 +179,17 @@ tests/
 ### Ejecutar Tests
 
 ```bash
-pytest tests/ -v
+python -m pytest tests/ -v
 ```
+
+Las pruebas de integración usan un clip sintético servido por HTTP local y
+requieren `ffmpeg` y `ffprobe`. Para incluir el flujo de interfaz en Linux:
+
+```bash
+YDOWNLOADER_TEST_GUI=1 xvfb-run -a python -m pytest tests/
+```
+
+Ver [revisión y límites de validación](REVIEW.md), incluida la comprobación de YouTube.
 
 ### Linting
 
@@ -196,4 +205,4 @@ No utilices esta herramienta para infringir derechos de autor.
 
 ## Licencia
 
-MIT License - ver [LICENSE](LICENSE) para más detalles.
+MIT License - ver [LICENSE.md](LICENSE.md) para más detalles.

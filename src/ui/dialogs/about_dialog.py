@@ -4,7 +4,7 @@ About dialog with legal disclaimer.
 
 import customtkinter as ctk
 
-from src import __version__, __app_name__
+from src import __app_name__, __version__
 
 
 class AboutDialog(ctk.CTkToplevel):
