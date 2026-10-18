@@ -2,10 +2,11 @@
 Shared pytest fixtures for YDownloader tests.
 """
 
-import pytest
-from pathlib import Path
-import tempfile
 import shutil
+import tempfile
+from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture
@@ -32,6 +33,7 @@ def sample_urls():
 @pytest.fixture
 def mock_download_progress():
     """Factory for creating mock download progress data."""
+
     def _create(percent: int = 50, status: str = "downloading", title: str = "Test Video"):
         return {
             "percent": percent,
@@ -40,4 +42,5 @@ def mock_download_progress():
             "eta": 60,
             "speed": "1.5 MiB/s",
         }
+
     return _create

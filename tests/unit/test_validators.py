@@ -3,6 +3,7 @@ Unit tests for URL validators.
 """
 
 import pytest
+
 from src.domain.validators import URLValidator, ValidationResult
 
 

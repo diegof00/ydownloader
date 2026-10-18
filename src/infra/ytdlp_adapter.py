@@ -8,16 +8,19 @@ Wraps yt-dlp functionality with:
 - Safe argument passing (no shell injection)
 """
 
+import shutil
+import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
-from src.domain.models import DownloadFormat
 from src.domain.errors import (
-    DownloadError,
     CancelledException,
     ContentUnavailableError,
+    DownloadError,
 )
+from src.domain.models import DownloadFormat
+from src.infra.file_system import FileSystem
 
 
 class YtdlpAdapter:
@@ -33,7 +36,6 @@ class YtdlpAdapter:
     def __init__(self):
         """Initialize the adapter."""
         self._cancel_event = threading.Event()
-        self._current_filename: Optional[str] = None
 
     def download(
         self,
@@ -61,9 +63,15 @@ class YtdlpAdapter:
         """
         import yt_dlp
 
-        self._cancel_event.clear()
-        self._current_filename = None
-        downloaded_file: Optional[Path] = None
+        downloaded_file: Path | None = None
+
+        if self._cancel_event.is_set():
+            raise CancelledException()
+        if not shutil.which("ffmpeg"):
+            raise DownloadError(
+                "FFmpeg is not installed",
+                "FFmpeg no está instalado. Instálalo y verifica que esté disponible en el PATH.",
+            )
 
         def progress_hook(d):
             # Check for cancellation
@@ -82,58 +90,53 @@ class YtdlpAdapter:
                 else:
                     percent = 0
 
-                on_progress({
-                    "percent": percent,
-                    "status": "downloading",
-                    "title": d.get("info_dict", {}).get("title"),
-                    "eta": d.get("eta"),
-                    "speed": d.get("_speed_str"),
-                })
+                on_progress(
+                    {
+                        "percent": percent,
+                        "status": "downloading",
+                        "title": d.get("info_dict", {}).get("title"),
+                        "eta": d.get("eta"),
+                        "speed": d.get("_speed_str"),
+                    }
+                )
 
             elif status == "finished":
-                self._current_filename = d.get("filename")
-                on_progress({
-                    "percent": 100,
-                    "status": "processing",
-                    "title": d.get("info_dict", {}).get("title"),
-                })
+                on_progress(
+                    {
+                        "percent": 100,
+                        "status": "processing",
+                        "title": d.get("info_dict", {}).get("title"),
+                    }
+                )
 
-        # Configure yt-dlp options
-        ydl_opts = self._get_options(output_folder, format, progress_hook)
+        # Keep temporary files isolated so cancellation cannot remove other downloads.
+        workspace = Path(tempfile.mkdtemp(prefix=".ydownloader-", dir=output_folder))
+        ydl_opts = self._get_options(workspace, format, progress_hook)
+
+        def finished_hook(filename):
+            if self._cancel_event.is_set():
+                raise CancelledException()
+            nonlocal downloaded_file
+            downloaded_file = Path(filename)
+
+        # Runs after conversion and merging, with the actual final filename.
+        ydl_opts["post_hooks"] = [finished_hook]
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Extract info first to get title
-                info = ydl.extract_info(url, download=False)
-                if info is None:
+                info = ydl.extract_info(url, download=True)
+                if info is None or info.get("_type") in ("playlist", "multi_video"):
                     raise ContentUnavailableError(url)
 
-                title = info.get("title", "video")
-                on_progress({
-                    "percent": 0,
-                    "status": "connecting",
-                    "title": title,
-                })
-
-                # Check for cancellation before starting
-                if self._cancel_event.is_set():
-                    raise CancelledException()
-
-                # Download
-                ydl.download([url])
-
-            # Find the downloaded file
-            if self._current_filename:
-                downloaded_file = Path(self._current_filename)
-            else:
-                # Try to find the file by pattern
-                ext = "mp3" if format == DownloadFormat.AUDIO else "mp4"
-                candidates = list(output_folder.glob(f"*{title}*.{ext}"))
-                if candidates:
-                    downloaded_file = candidates[0]
+            if self._cancel_event.is_set():
+                raise CancelledException()
 
             if downloaded_file and downloaded_file.exists():
-                return downloaded_file
+                destination = FileSystem().get_unique_filename(
+                    output_folder, downloaded_file.stem, downloaded_file.suffix
+                )
+                shutil.move(str(downloaded_file), str(destination))
+                return destination
             else:
                 raise DownloadError(
                     "Download completed but file not found",
@@ -141,28 +144,42 @@ class YtdlpAdapter:
                 )
 
         except CancelledException:
-            # Clean up partial files
-            self._cleanup_partial(output_folder)
             raise
 
         except yt_dlp.utils.DownloadError as e:
+            if self._cancel_event.is_set():
+                raise CancelledException() from e
             error_str = str(e).lower()
 
+            if any(token in error_str for token in ("sign in", "not a bot", "login required")):
+                raise DownloadError(
+                    str(e),
+                    "El sitio exige iniciar sesión o verificar que no eres un bot. "
+                    "Esta descarga requiere autenticación y no puede completarse sin ella.",
+                ) from e
+
             if "private" in error_str or "unavailable" in error_str:
-                raise ContentUnavailableError(url)
+                raise ContentUnavailableError(url) from e
 
             if "network" in error_str or "connection" in error_str:
                 raise DownloadError(
                     str(e),
                     "Error de conexión. Verifica tu conexión a internet e intenta de nuevo.",
-                )
+                ) from e
 
-            raise DownloadError(str(e))
+            raise DownloadError(str(e)) from e
 
         except Exception as e:
             if isinstance(e, (CancelledException, DownloadError, ContentUnavailableError)):
                 raise
-            raise DownloadError(str(e))
+            raise DownloadError(str(e)) from e
+
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    def prepare(self) -> None:
+        """Reset cancellation before publishing a new job to the worker thread."""
+        self._cancel_event.clear()
 
     def cancel(self) -> None:
         """Signal cancellation of the current download."""
@@ -218,43 +235,53 @@ class YtdlpAdapter:
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
+            "noplaylist": True,
+            "socket_timeout": 15,
+            "retries": 3,
+            "extractor_retries": 3,
+            "match_filter": self._reject_playlist,
+            "postprocessor_hooks": [self._check_postprocessing_cancel],
             # Security: never use shell
             "no_color": True,
         }
 
         if format == DownloadFormat.AUDIO:
             # Audio-only: best audio, convert to MP3
-            opts.update({
-                "format": "bestaudio/best",
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }],
-            })
+            opts.update(
+                {
+                    "format": "bestaudio/best",
+                    "postprocessors": [
+                        {
+                            "key": "FFmpegExtractAudio",
+                            "preferredcodec": "mp3",
+                            "preferredquality": "192",
+                        }
+                    ],
+                }
+            )
         else:
             # Video: best quality with audio
-            opts.update({
-                "format": "bestvideo+bestaudio/best",
-                "merge_output_format": "mp4",
-            })
+            opts.update(
+                {
+                    "format": "bestvideo+bestaudio/best",
+                    "merge_output_format": "mp4",
+                    "postprocessors": [
+                        {
+                            "key": "FFmpegVideoRemuxer",
+                            "preferedformat": "mp4",
+                        }
+                    ],
+                }
+            )
 
         return opts
 
-    def _cleanup_partial(self, folder: Path) -> None:
-        """
-        Clean up partial download files.
+    @staticmethod
+    def _reject_playlist(info, *, incomplete=False):
+        if info.get("playlist_id") is not None:
+            return "Selecciona un video individual, no una lista de reproducción."
+        return None
 
-        Args:
-            folder: Folder to clean up
-        """
-        try:
-            patterns = ["*.part", "*.ytdl", "*.temp"]
-            for pattern in patterns:
-                for file in folder.glob(pattern):
-                    try:
-                        file.unlink()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    def _check_postprocessing_cancel(self, _):
+        if self._cancel_event.is_set():
+            raise CancelledException()

@@ -9,9 +9,8 @@ Stores user preferences between sessions:
 
 import json
 from pathlib import Path
-from typing import Optional
 
-from src.domain.models import Settings, DownloadFormat
+from src.domain.models import DownloadFormat, Settings
 from src.infra.platform import get_config_file_path
 
 
@@ -22,7 +21,7 @@ class ConfigStore:
     Stores settings in a JSON file in the app data folder.
     """
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         """
         Initialize the config store.
 
@@ -31,7 +30,7 @@ class ConfigStore:
                         Uses default app data location if not provided.
         """
         self._config_path = config_path or get_config_file_path()
-        self._settings: Optional[Settings] = None
+        self._settings: Settings | None = None
 
     def load(self) -> Settings:
         """
@@ -51,7 +50,7 @@ class ConfigStore:
             else:
                 self._settings = Settings()
 
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             # Corrupted config, use defaults
             self._settings = Settings()
 
@@ -81,7 +80,7 @@ class ConfigStore:
         except Exception:
             return False
 
-    def get_last_output_folder(self) -> Optional[Path]:
+    def get_last_output_folder(self) -> Path | None:
         """
         Get the last used output folder.
 

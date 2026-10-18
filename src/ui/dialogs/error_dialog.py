@@ -2,8 +2,9 @@
 Error dialog for displaying user-friendly error messages.
 """
 
+from collections.abc import Callable
+
 import customtkinter as ctk
-from typing import Callable, Optional
 
 
 class ErrorDialog(ctk.CTkToplevel):
@@ -19,8 +20,8 @@ class ErrorDialog(ctk.CTkToplevel):
         title: str = "Error",
         message: str = "",
         show_retry: bool = False,
-        on_retry: Optional[Callable[[], None]] = None,
-        **kwargs
+        on_retry: Callable[[], None] | None = None,
+        **kwargs,
     ):
         """
         Initialize error dialog.
@@ -108,7 +109,7 @@ class ErrorDialog(ctk.CTkToplevel):
         self._result = "close"
         self.destroy()
 
-    def get_result(self) -> Optional[str]:
+    def get_result(self) -> str | None:
         """Get the dialog result after it's closed."""
         return self._result
 
@@ -118,8 +119,8 @@ def show_error(
     message: str,
     title: str = "Error",
     show_retry: bool = False,
-    on_retry: Optional[Callable[[], None]] = None,
-) -> Optional[str]:
+    on_retry: Callable[[], None] | None = None,
+) -> str | None:
     """
     Show an error dialog and wait for user response.
 

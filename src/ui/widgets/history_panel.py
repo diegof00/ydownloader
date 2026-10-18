@@ -2,11 +2,12 @@
 History panel widget showing recent downloads.
 """
 
-import customtkinter as ctk
-from pathlib import Path
-from typing import Callable, Optional, List
-import subprocess
 import platform
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+
+import customtkinter as ctk
 
 from src.domain.models import HistoryEntry
 
@@ -16,12 +17,7 @@ class HistoryPanel(ctk.CTkFrame):
     Panel showing the last 5 downloads with clear functionality.
     """
 
-    def __init__(
-        self,
-        master,
-        on_clear: Optional[Callable[[], None]] = None,
-        **kwargs
-    ):
+    def __init__(self, master, on_clear: Callable[[], None] | None = None, **kwargs):
         """
         Initialize history panel widget.
 
@@ -32,7 +28,7 @@ class HistoryPanel(ctk.CTkFrame):
         """
         super().__init__(master, **kwargs)
         self._on_clear = on_clear
-        self._entries: List[HistoryEntry] = []
+        self._entries: list[HistoryEntry] = []
 
         self._setup_ui()
 
@@ -74,7 +70,7 @@ class HistoryPanel(ctk.CTkFrame):
         if self._on_clear:
             self._on_clear()
 
-    def update_entries(self, entries: List[HistoryEntry]):
+    def update_entries(self, entries: list[HistoryEntry]):
         """
         Update the displayed entries.
 

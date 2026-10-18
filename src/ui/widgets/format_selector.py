@@ -2,8 +2,9 @@
 Format selector widget for choosing video or audio.
 """
 
+from collections.abc import Callable
+
 import customtkinter as ctk
-from typing import Callable, Optional
 
 from src.domain.models import DownloadFormat
 
@@ -19,8 +20,8 @@ class FormatSelector(ctk.CTkFrame):
         self,
         master,
         initial_format: DownloadFormat = DownloadFormat.VIDEO,
-        on_change: Optional[Callable[[DownloadFormat], None]] = None,
-        **kwargs
+        on_change: Callable[[DownloadFormat], None] | None = None,
+        **kwargs,
     ):
         """
         Initialize format selector widget.

@@ -2,10 +2,11 @@
 Folder picker widget for selecting download destination.
 """
 
-import customtkinter as ctk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog
-from typing import Callable, Optional
+
+import customtkinter as ctk
 
 
 class FolderPicker(ctk.CTkFrame):
@@ -21,9 +22,9 @@ class FolderPicker(ctk.CTkFrame):
     def __init__(
         self,
         master,
-        initial_folder: Optional[Path] = None,
-        on_change: Optional[Callable[[Path], None]] = None,
-        **kwargs
+        initial_folder: Path | None = None,
+        on_change: Callable[[Path], None] | None = None,
+        **kwargs,
     ):
         """
         Initialize folder picker widget.
@@ -92,7 +93,7 @@ class FolderPicker(ctk.CTkFrame):
             return f"  {path_str}"
 
         # Show beginning and end
-        return f"  ...{path_str[-(max_length - 3):]}"
+        return f"  ...{path_str[-(max_length - 3) :]}"
 
     def get_folder(self) -> Path:
         """Get the currently selected folder."""

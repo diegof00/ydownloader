@@ -5,8 +5,6 @@ All exceptions include a user-friendly message that can be displayed
 directly to non-technical users without exposing technical details.
 """
 
-from typing import Optional
-
 
 class DomainError(Exception):
     """Base exception for all domain errors."""
@@ -46,7 +44,7 @@ class UnsupportedSiteError(DomainError):
 class DownloadError(DomainError):
     """Raised when download fails due to network or server issues."""
 
-    def __init__(self, message: str = "Download failed", user_message: Optional[str] = None):
+    def __init__(self, message: str = "Download failed", user_message: str | None = None):
         super().__init__(
             message=message,
             user_message=user_message

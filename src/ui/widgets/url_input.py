@@ -2,8 +2,9 @@
 URL input widget for pasting/typing URLs.
 """
 
+from collections.abc import Callable
+
 import customtkinter as ctk
-from typing import Callable, Optional
 
 
 class URLInput(ctk.CTkFrame):
@@ -16,12 +17,7 @@ class URLInput(ctk.CTkFrame):
     - Clear functionality
     """
 
-    def __init__(
-        self,
-        master,
-        on_change: Optional[Callable[[str], None]] = None,
-        **kwargs
-    ):
+    def __init__(self, master, on_change: Callable[[str], None] | None = None, **kwargs):
         """
         Initialize URL input widget.
 

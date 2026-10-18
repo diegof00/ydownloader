@@ -4,29 +4,27 @@ Main application window.
 Composes all widgets and manages the download workflow.
 """
 
-import customtkinter as ctk
+import queue
 from pathlib import Path
 from tkinter import messagebox
-from typing import Optional
-import queue
-import threading
 
-from src.domain.models import Download, DownloadFormat, DownloadStatus, HistoryEntry
+import customtkinter as ctk
+
 from src.domain.download_service import DownloadService
+from src.domain.models import Download, DownloadStatus
 from src.domain.validators import URLValidator
-from src.infra.ytdlp_adapter import YtdlpAdapter
-from src.infra.file_system import FileSystem
 from src.infra.config_store import ConfigStore
+from src.infra.file_system import FileSystem
 from src.infra.history_store import HistoryStore
-
-from src.ui.widgets.url_input import URLInput
+from src.infra.ytdlp_adapter import YtdlpAdapter
+from src.ui.dialogs.about_dialog import AboutDialog, DisclaimerDialog
+from src.ui.dialogs.error_dialog import show_error
+from src.ui.widgets.download_button import DownloadButton
 from src.ui.widgets.folder_picker import FolderPicker
 from src.ui.widgets.format_selector import FormatSelector
-from src.ui.widgets.progress_bar import ProgressBar
-from src.ui.widgets.download_button import DownloadButton
 from src.ui.widgets.history_panel import HistoryPanel
-from src.ui.dialogs.error_dialog import show_error
-from src.ui.dialogs.about_dialog import AboutDialog, DisclaimerDialog
+from src.ui.widgets.progress_bar import ProgressBar
+from src.ui.widgets.url_input import URLInput
 
 
 class MainWindow(ctk.CTk):
@@ -58,7 +56,8 @@ class MainWindow(ctk.CTk):
 
         # Queue for thread-safe UI updates
         self._update_queue: queue.Queue = queue.Queue()
-        self._current_download: Optional[Download] = None
+        self._current_download: Download | None = None
+        self._closing = False
 
         self._setup_window()
         self._setup_ui()
@@ -132,6 +131,7 @@ class MainWindow(ctk.CTk):
         self._format_selector = FormatSelector(
             options,
             initial_format=initial_format,
+            on_change=self._config_store.set_default_format,
         )
         self._format_selector.grid(row=0, column=1, sticky="ew")
 
@@ -148,9 +148,7 @@ class MainWindow(ctk.CTk):
         self._download_button.pack(fill="x", pady=(0, 20))
 
         # Separator
-        ctk.CTkFrame(main, height=2, fg_color=("gray80", "gray30")).pack(
-            fill="x", pady=(0, 20)
-        )
+        ctk.CTkFrame(main, height=2, fg_color=("gray80", "gray30")).pack(fill="x", pady=(0, 20))
 
         # History panel
         self._history_panel = HistoryPanel(
@@ -216,7 +214,7 @@ class MainWindow(ctk.CTk):
         if self._current_download:
             self._download_service.cancel_download(self._current_download.id)
 
-    def _on_progress(self, percent: int, status: DownloadStatus, title: Optional[str]):
+    def _on_progress(self, percent: int, status: DownloadStatus, title: str | None):
         """Handle progress update from download thread."""
         # Queue update for main thread
         self._update_queue.put(("progress", percent, status, title))
@@ -254,23 +252,20 @@ class MainWindow(ctk.CTk):
             self._set_downloading_state(False)
 
             if download.status == DownloadStatus.COMPLETED:
-                self._progress_bar.update_progress(
-                    100, DownloadStatus.COMPLETED, download.title
-                )
+                self._progress_bar.update_progress(100, DownloadStatus.COMPLETED, download.title)
                 # Update history
                 entries = self._history_store.get_entries()
                 self._history_panel.update_entries(entries)
 
             elif download.status == DownloadStatus.CANCELLED:
-                self._progress_bar.update_progress(
-                    0, DownloadStatus.CANCELLED, None
-                )
+                self._progress_bar.update_progress(0, DownloadStatus.CANCELLED, None)
 
         elif update_type == "error":
             _, message = update
             self._set_downloading_state(False)
             self._progress_bar.show_error(message)
-            show_error(self, message)
+            if not self._closing:
+                show_error(self, message)
 
     def _set_downloading_state(self, is_downloading: bool):
         """Update UI for downloading/idle state."""
@@ -285,7 +280,9 @@ class MainWindow(ctk.CTk):
         self._history_panel.update_entries([])
 
     def _on_close(self):
-        """Handle window close event."""
+        """Cancel and wait for cleanup without blocking the Tk event loop."""
+        if self._closing:
+            return
         # Check if download is in progress
         if self._current_download and self._current_download.is_active:
             result = messagebox.askyesno(
@@ -297,4 +294,12 @@ class MainWindow(ctk.CTk):
             # Cancel the download
             self._cancel_download()
 
-        self.destroy()
+        self._closing = True
+        self._download_button.set_enabled(False)
+        self._finish_close()
+
+    def _finish_close(self):
+        if self._download_service.is_running():
+            self.after(100, self._finish_close)
+        else:
+            self.destroy()

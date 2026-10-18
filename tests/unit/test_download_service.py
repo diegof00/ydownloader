@@ -2,12 +2,14 @@
 Unit tests for DownloadService.
 """
 
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock
-from src.domain.models import Download, DownloadFormat, DownloadStatus
+from threading import Event
+from unittest.mock import Mock
+
+import pytest
+
 from src.domain.download_service import DownloadService
-from src.domain.errors import InvalidURLError, PermissionError
+from src.domain.models import Download, DownloadFormat
 
 
 class TestDownloadService:
@@ -86,9 +88,7 @@ class TestDownloadService:
 
     def test_start_download_calls_error_on_invalid_url(self, service, mock_validator):
         """Test that invalid URL triggers error callback."""
-        mock_validator.validate.return_value = Mock(
-            is_valid=False, error_message="URL inválida"
-        )
+        mock_validator.validate.return_value = Mock(is_valid=False, error_message="URL inválida")
         on_error = Mock()
 
         service.start_download(
@@ -103,9 +103,7 @@ class TestDownloadService:
         on_error.assert_called_once()
         assert "URL" in on_error.call_args[0][0]
 
-    def test_start_download_calls_error_on_no_permission(
-        self, service, mock_file_system
-    ):
+    def test_start_download_calls_error_on_no_permission(self, service, mock_file_system):
         """Test that no write permission triggers error callback."""
         mock_file_system.can_write.return_value = False
         on_error = Mock()
@@ -139,6 +137,11 @@ class TestDownloadService:
 
     def test_cancel_download_when_active(self, service, mock_downloader):
         """Test cancelling an active download."""
+        release = Event()
+        mock_downloader.download.side_effect = lambda **kwargs: (
+            release.wait(5),
+            Path("/output/video.mp4"),
+        )[1]
         # Start a download first
         download = service.start_download(
             url="https://www.youtube.com/watch?v=test",
@@ -150,6 +153,8 @@ class TestDownloadService:
         )
 
         result = service.cancel_download(download.id)
+        release.set()
+        service._download_thread.join(5)
 
         assert result is True
         mock_downloader.cancel.assert_called_once()
@@ -164,8 +169,13 @@ class TestDownloadService:
         result = service.get_current_download()
         assert result is None
 
-    def test_only_one_download_at_a_time(self, service):
+    def test_only_one_download_at_a_time(self, service, mock_downloader):
         """Test that only one download can be active at a time."""
+        release = Event()
+        mock_downloader.download.side_effect = lambda **kwargs: (
+            release.wait(5),
+            Path("/output/video.mp4"),
+        )[1]
         # Start first download
         download1 = service.start_download(
             url="https://www.youtube.com/watch?v=test1",
@@ -175,6 +185,8 @@ class TestDownloadService:
             on_complete=Mock(),
             on_error=Mock(),
         )
+
+        assert download1 is not None
 
         # Try to start second download
         on_error = Mock()
@@ -189,4 +201,7 @@ class TestDownloadService:
 
         # Second download should fail or be rejected
         # Implementation can either call error or return None
-        assert download2 is None or on_error.called
+        release.set()
+        service._download_thread.join(5)
+        assert download2 is None
+        on_error.assert_called_once()

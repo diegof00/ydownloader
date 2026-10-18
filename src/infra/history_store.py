@@ -10,12 +10,11 @@ Maintains a list of the last 5 downloads with:
 """
 
 import json
+import threading
 from pathlib import Path
-from typing import Optional
 
 from src.domain.models import HistoryEntry
 from src.infra.platform import get_history_file_path
-
 
 MAX_HISTORY_ENTRIES = 5
 
@@ -28,7 +27,7 @@ class HistoryStore:
     Uses FIFO (First In, First Out) when limit is reached.
     """
 
-    def __init__(self, history_path: Optional[Path] = None):
+    def __init__(self, history_path: Path | None = None):
         """
         Initialize the history store.
 
@@ -37,7 +36,8 @@ class HistoryStore:
                          Uses default app data location if not provided.
         """
         self._history_path = history_path or get_history_file_path()
-        self._entries: Optional[list[HistoryEntry]] = None
+        self._entries: list[HistoryEntry] | None = None
+        self._lock = threading.RLock()
 
     def load(self) -> list[HistoryEntry]:
         """
@@ -46,26 +46,33 @@ class HistoryStore:
         Returns:
             List of HistoryEntry objects (empty list if file doesn't exist)
         """
-        if self._entries is not None:
-            return self._entries
+        with self._lock:
+            if self._entries is not None:
+                return list(self._entries)
 
-        try:
-            if self._history_path.exists():
-                content = self._history_path.read_text(encoding="utf-8")
-                data = json.loads(content)
+            try:
+                if self._history_path.exists():
+                    content = self._history_path.read_text(encoding="utf-8")
+                    data = json.loads(content)
 
-                entries_data = data.get("entries", [])
-                self._entries = [
-                    HistoryEntry.from_dict(entry) for entry in entries_data
-                ]
-            else:
+                    entries_data = data.get("entries", [])
+                    if not isinstance(entries_data, list):
+                        raise ValueError("Invalid history list")
+                    self._entries = []
+                    for entry in entries_data:
+                        try:
+                            self._entries.append(HistoryEntry.from_dict(entry))
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                    self._entries = self._entries[:MAX_HISTORY_ENTRIES]
+                else:
+                    self._entries = []
+
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                # Corrupted history, start fresh
                 self._entries = []
 
-        except (json.JSONDecodeError, KeyError, TypeError):
-            # Corrupted history, start fresh
-            self._entries = []
-
-        return self._entries
+            return list(self._entries)
 
     def save(self, entries: list[HistoryEntry]) -> bool:
         """
@@ -77,29 +84,30 @@ class HistoryStore:
         Returns:
             True if saved successfully, False otherwise
         """
-        try:
-            # Ensure directory exists
-            self._history_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            try:
+                # Ensure directory exists
+                self._history_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Prepare data
-            data = {
-                "version": 1,
-                "entries": [entry.to_dict() for entry in entries],
-            }
+                # Prepare data
+                data = {
+                    "version": 1,
+                    "entries": [entry.to_dict() for entry in entries],
+                }
 
-            # Write atomically
-            content = json.dumps(data, indent=2, ensure_ascii=False)
-            temp_path = self._history_path.with_suffix(".tmp")
-            temp_path.write_text(content, encoding="utf-8")
-            temp_path.replace(self._history_path)
+                # Write atomically
+                content = json.dumps(data, indent=2, ensure_ascii=False)
+                temp_path = self._history_path.with_suffix(".tmp")
+                temp_path.write_text(content, encoding="utf-8")
+                temp_path.replace(self._history_path)
 
-            # Update cache
-            self._entries = entries
+                # Update cache
+                self._entries = list(entries)
 
-            return True
+                return True
 
-        except Exception:
-            return False
+            except Exception:
+                return False
 
     def add(self, entry: HistoryEntry) -> None:
         """
@@ -112,16 +120,17 @@ class HistoryStore:
         Args:
             entry: The HistoryEntry to add
         """
-        entries = self.load()
+        with self._lock:
+            entries = self.load()
 
-        # Add new entry at the beginning
-        entries.insert(0, entry)
+            # Add new entry at the beginning
+            entries.insert(0, entry)
 
-        # Enforce limit (keep only the newest entries)
-        if len(entries) > MAX_HISTORY_ENTRIES:
-            entries = entries[:MAX_HISTORY_ENTRIES]
+            # Enforce limit (keep only the newest entries)
+            if len(entries) > MAX_HISTORY_ENTRIES:
+                entries = entries[:MAX_HISTORY_ENTRIES]
 
-        self.save(entries)
+            self.save(entries)
 
     def clear(self) -> bool:
         """
@@ -130,8 +139,9 @@ class HistoryStore:
         Returns:
             True if cleared successfully, False otherwise
         """
-        self._entries = []
-        return self.save([])
+        with self._lock:
+            self._entries = []
+            return self.save([])
 
     def get_entries(self) -> list[HistoryEntry]:
         """
@@ -140,4 +150,5 @@ class HistoryStore:
         Returns:
             List of HistoryEntry objects (most recent first)
         """
-        return self.load()
+        with self._lock:
+            return self.load()

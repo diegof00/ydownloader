@@ -3,10 +3,8 @@ Progress bar widget with status display.
 """
 
 import customtkinter as ctk
-from typing import Optional
 
 from src.domain.models import DownloadStatus
-
 
 # Status display text mapping
 STATUS_LABELS = {
@@ -40,7 +38,7 @@ class ProgressBar(ctk.CTkFrame):
         """
         super().__init__(master, **kwargs)
         self._status = DownloadStatus.PENDING
-        self._title: Optional[str] = None
+        self._title: str | None = None
 
         self._setup_ui()
 
@@ -80,12 +78,7 @@ class ProgressBar(ctk.CTkFrame):
         )
         self._percent_label.pack(side="right")
 
-    def update_progress(
-        self,
-        percent: int,
-        status: DownloadStatus,
-        title: Optional[str] = None
-    ):
+    def update_progress(self, percent: int, status: DownloadStatus, title: str | None = None):
         """
         Update the progress display.
 
